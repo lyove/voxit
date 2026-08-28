@@ -1,0 +1,22 @@
+{
+  "name": "@voxit/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voxit core - Provider 抽象 + 共享类型（前后端共享）",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
