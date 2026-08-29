@@ -22,12 +22,27 @@ export function initDb(dbPath?: string): DatabaseSync {
   db.exec('PRAGMA foreign_keys = ON'); // 启用外键约束，使 ON DELETE CASCADE 生效
 
   createTables(db);
+  migrateSchema(db);
   return db;
 }
 
 export function getDb(): DatabaseSync {
   if (!db) throw new Error('Database not initialized. Call initDb() first.');
   return db;
+}
+
+function columnExists(database: DatabaseSync, table: string, column: string): boolean {
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return cols.some((c) => c.name === column);
+}
+
+function migrateSchema(database: DatabaseSync): void {
+  if (!columnExists(database, 'vx_paragraphs', 'voice_model')) {
+    database.exec(`ALTER TABLE vx_paragraphs ADD COLUMN voice_model TEXT`);
+  }
+  if (!columnExists(database, 'vx_voice_templates', 'voice_model')) {
+    database.exec(`ALTER TABLE vx_voice_templates ADD COLUMN voice_model TEXT`);
+  }
 }
 
 function createTables(database: DatabaseSync): void {
@@ -59,6 +74,7 @@ function createTables(database: DatabaseSync): void {
       role TEXT NOT NULL,
       character_name TEXT,
       voice_id TEXT,
+      voice_model TEXT,
       voice_params TEXT,
       audio_url TEXT,
       status TEXT NOT NULL DEFAULT 'draft',
@@ -76,6 +92,7 @@ function createTables(database: DatabaseSync): void {
       project_id TEXT NOT NULL,
       character_name TEXT NOT NULL,
       voice_id TEXT NOT NULL,
+      voice_model TEXT,
       voice_params TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,

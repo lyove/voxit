@@ -17,7 +17,7 @@ const { Sider, Content, Header } = Layout;
 const menuItems = [
   { key: "/dashboard", icon: <DashboardOutlined />, label: "数据面板" },
   { key: "/books", icon: <BookOutlined />, label: "书籍目录" },
-  { key: "/voices", icon: <AudioOutlined />, label: "AI角色" },
+  { key: "/voices", icon: <AudioOutlined />, label: "AI音色" },
   { key: "/settings", icon: <SettingOutlined />, label: "系统设置" },
 ];
 

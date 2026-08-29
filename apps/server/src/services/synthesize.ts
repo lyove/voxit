@@ -3,6 +3,7 @@
  */
 import {
   VxParagraphStatus,
+  VxProvider,
   type VxProviderConfig,
 } from '@voxit/core';
 import { getParagraph, listProjects, updateParagraph } from '../db/repository.js';
@@ -19,6 +20,39 @@ export function resolveProviderConfig(chapterId: string): VxProviderConfig | und
   return undefined;
 }
 
+/**
+ * voiceId → Provider 归属索引（跨 Provider 混用时按音色自动路由）
+ * 音色列表是静态的，缓存避免每次合成都重复拉取。
+ */
+const voiceOwnerCache = new Map<string, VxProvider>();
+
+/** 所有可用的 Provider 列表（按此顺序建索引） */
+const ALL_PROVIDERS: VxProvider[] = [VxProvider.ALIYUN, VxProvider.DOUBAO];
+
+/**
+ * 解析 voiceId 所属的 Provider（用于跨 Provider 混用）。
+ * 遍历所有已配置凭证的 Provider 的 listVoices() 建立索引；
+ * 未命中（旧数据/未知音色）时回退到 fallback（书籍配置的 Provider）。
+ */
+export async function resolveVoiceProvider(voiceId: string, fallback: VxProvider): Promise<VxProvider> {
+  const cached = voiceOwnerCache.get(voiceId);
+  if (cached) return cached;
+  for (const p of ALL_PROVIDERS) {
+    try {
+      const { apiKey, workspaceId, resourceId, defaultModel } = getProviderCredentials(p);
+      const provider = initProvider(p, { apiKey, workspaceId, resourceId, defaultModel });
+      const voices = await provider.listVoices();
+      for (const v of voices) voiceOwnerCache.set(v.id, p);
+      if (voices.some((v) => v.id === voiceId)) {
+        return p;
+      }
+    } catch {
+      // 该 Provider 未配置凭证，跳过（不影响其它 Provider）
+    }
+  }
+  return fallback;
+}
+
 /** 合成单个段落（已确认有 voiceId） */
 export async function synthesizeParagraphById(id: string): Promise<void> {
   const para = getParagraph(id);
@@ -31,12 +65,15 @@ export async function synthesizeParagraphById(id: string): Promise<void> {
   updateParagraph(para.id, { status: VxParagraphStatus.SYNTHESIZING, error: undefined });
 
   try {
-    const { apiKey, workspaceId } = getProviderCredentials(config.provider);
-    const provider = initProvider(config.provider, { apiKey, workspaceId });
+    // 跨 Provider 混用：按 voiceId 归属路由 Provider，未知音色回退到书籍 Provider
+    const voiceProvider = await resolveVoiceProvider(para.voiceId, config.provider);
+    const { apiKey, workspaceId, resourceId } = getProviderCredentials(voiceProvider);
+    const provider = initProvider(voiceProvider, { apiKey, workspaceId, resourceId });
 
     const result = await provider.synthesize({
       text: para.text,
       voiceId: para.voiceId,
+      voiceModel: para.voiceModel,
       voiceParams: para.voiceParams,
       format: config.audioFormat ?? 'wav',
       sampleRate: config.sampleRate ?? 24000,

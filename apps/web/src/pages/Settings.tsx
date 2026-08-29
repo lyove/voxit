@@ -26,7 +26,7 @@ export default function Settings() {
     try {
       const entries: ProviderStatus[] = await Promise.all([
         checkProvider(VxProvider.ALIYUN, '阿里云百炼'),
-        checkProvider(VxProvider.DOUBAO, '火山引擎豆包'),
+        checkProvider(VxProvider.DOUBAO, '豆包火山引擎'),
       ]);
       setStatus(entries);
     } finally {
@@ -82,7 +82,7 @@ export default function Settings() {
             API Key / Token 不再保存在浏览器，统一在服务器{' '}
             <Text code>apps/server/.env</Text> 中配置（
             <Text code>ALIYUN_API_KEY</Text>、<Text code>ALIYUN_WORKSPACE_ID</Text>、
-            <Text code>DOUBAO_APP_ID</Text>、<Text code>DOUBAO_TOKEN</Text>）。配置后需重启后端生效。
+            <Text code>DOUBAO_API_KEY</Text>、<Text code>DOUBAO_RESOURCE_ID</Text>）。配置后需重启后端生效。
           </span>
         }
       />

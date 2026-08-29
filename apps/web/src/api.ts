@@ -10,7 +10,6 @@ import type {
   VxProvider,
   VxProviderCapabilities,
   VxProviderConfig,
-  VxRole,
   VxVoice,
   VxVoiceParams,
   VxVoiceTemplate,
@@ -218,8 +217,8 @@ export async function synthesizeAllStream(
 
 export const fetchParagraphs = (chapterId: string) =>
   api.get<VxParagraph[]>(`/paragraphs/${chapterId}`).then((r) => r.data);
-export const createParagraph = (chapterId: string, text: string, role: VxRole, characterName?: string) =>
-  api.post<VxParagraph>('/paragraphs', { chapterId, text, role, characterName }).then((r) => r.data);
+export const createParagraph = (chapterId: string, text: string, characterName?: string) =>
+  api.post<VxParagraph>('/paragraphs', { chapterId, text, characterName }).then((r) => r.data);
 export const updateParagraph = (id: string, patch: Partial<VxParagraph>) =>
   api.patch<VxParagraph>(`/paragraphs/${id}`, patch).then((r) => r.data);
 /** 合成段落；body.audioUrl 存在时直接复用该试听音频作为合成结果 */
@@ -237,10 +236,10 @@ export const fetchVoices = (provider: VxProvider) =>
 
 // ============ Voice Templates ============
 
-export const fetchTemplates = (projectId: string) =>
+export const fetchVoiceTemplates = (projectId: string) =>
   api.get<VxVoiceTemplate[]>(`/templates/${projectId}`).then((r) => r.data);
-export const saveTemplate = (projectId: string, characterName: string, voiceId: string, voiceParams?: VxVoiceParams) =>
-  api.post<VxVoiceTemplate>('/templates', { projectId, characterName, voiceId, voiceParams }).then((r) => r.data);
+export const saveTemplate = (projectId: string, characterName: string, voiceId: string, voiceModel?: string, voiceParams?: VxVoiceParams) =>
+  api.post<VxVoiceTemplate>('/templates', { projectId, characterName, voiceId, voiceModel, voiceParams }).then((r) => r.data);
 export const deleteTemplate = (id: string) =>
   api.delete(`/templates/${id}`);
 
@@ -250,13 +249,14 @@ export const deleteTemplate = (id: string) =>
 export async function synthesizeLongStream(
   chapterId: string,
   voiceId: string,
+  voiceModel: string | undefined,
   onProgress: (stage: string) => void,
   voiceParams?: VxVoiceParams,
 ): Promise<string | undefined> {
   const resp = await fetch('/api/chapters/' + chapterId + '/synthesize-long', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-    body: JSON.stringify({ voiceId, voiceParams }),
+    body: JSON.stringify({ voiceId, voiceModel, voiceParams }),
   });
   if (!resp.ok || !resp.body) {
     throw new Error('长文本合成请求失败：HTTP ' + resp.status);

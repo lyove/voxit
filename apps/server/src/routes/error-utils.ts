@@ -5,7 +5,7 @@
 
 /** 从错误信息中提取 HTTP 状态码，推断合适的响应状态 */
 export function inferStatus(errorMessage: string): number {
-  if (errorMessage.includes('HTTP 401')) return 401;
+  if (errorMessage.includes('HTTP 401')) return 502;
   if (errorMessage.includes('HTTP 403')) return 403;
   if (errorMessage.includes('HTTP 429')) return 429;
   if (errorMessage.includes('HTTP 400')) return 400;

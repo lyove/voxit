@@ -31,8 +31,8 @@ providerRoutes.get('/:provider/capabilities', (req, res) => {
 providerRoutes.get('/:provider/voices', async (req, res) => {
   try {
     const provider = req.params.provider as VxProvider;
-    const { apiKey, workspaceId } = getProviderCredentials(provider);
-    const p = initProvider(provider, { apiKey, workspaceId });
+    const { apiKey, workspaceId, resourceId, defaultModel } = getProviderCredentials(provider);
+    const p = initProvider(provider, { apiKey, workspaceId, resourceId, defaultModel });
     const voices = await p.listVoices();
     res.json(voices);
   } catch (e) {
@@ -48,8 +48,8 @@ providerRoutes.get('/:provider/voices', async (req, res) => {
 providerRoutes.post('/:provider/preview', async (req, res) => {
   try {
     const provider = req.params.provider as VxProvider;
-    const { apiKey, workspaceId } = getProviderCredentials(provider);
-    const p = initProvider(provider, { apiKey, workspaceId });
+    const { apiKey, workspaceId, resourceId, defaultModel } = getProviderCredentials(provider);
+    const p = initProvider(provider, { apiKey, workspaceId, resourceId, defaultModel });
     const result = await p.preview(req.body as VxSynthesizeInput);
     res.json(result);
   } catch (e) {

@@ -6,7 +6,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createChapter, getChapters, getParagraphs, renameChapter } from '../db/repository.js';
 import { exportChapterAudio } from '../services/audio-export.js';
-import { batchSynthesize, resolveProviderConfig } from '../services/synthesize.js';
+import { batchSynthesize, resolveProviderConfig, resolveVoiceProvider } from '../services/synthesize.js';
 import { initProvider } from '../providers/registry.js';
 import { getProviderCredentials } from '../config.js';
 import { DoubaoProvider } from '../providers/doubao.provider.js';
@@ -165,7 +165,7 @@ chapterRoutes.post('/:chapterId/synthesize-all', async (req, res) => {
  * 响应：SSE，推送 progress/done/error
  */
 chapterRoutes.post('/:chapterId/synthesize-long', async (req, res) => {
-  const { voiceId, voiceParams } = req.body as { voiceId: string; voiceParams?: import('@voxit/core').VxVoiceParams };
+  const { voiceId, voiceModel, voiceParams } = req.body as { voiceId: string; voiceModel?: string; voiceParams?: import('@voxit/core').VxVoiceParams };
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -196,16 +196,18 @@ chapterRoutes.post('/:chapterId/synthesize-long', async (req, res) => {
       res.end();
       return;
     }
-    if (config.provider !== VxProvider.DOUBAO) {
-      send('error', { error: '整章长文本合成仅支持豆包，阿里云请用「一键合成」逐段合成' });
+    // 跨 Provider 混用：长文本合成仅豆包支持，voiceId 必须属于豆包
+    const voiceProvider = await resolveVoiceProvider(voiceId, config.provider);
+    if (voiceProvider !== VxProvider.DOUBAO) {
+      send('error', { error: '整章长文本合成仅支持豆包音色，请选择豆包发音人（阿里云请用「一键合成」逐段合成）' });
       res.end();
       return;
     }
 
-    const { apiKey, workspaceId } = getProviderCredentials(config.provider);
-    const provider = initProvider(config.provider, { apiKey, workspaceId }) as DoubaoProvider;
+    const { apiKey, workspaceId, resourceId } = getProviderCredentials(VxProvider.DOUBAO);
+    const provider = initProvider(VxProvider.DOUBAO, { apiKey, workspaceId, resourceId, defaultModel: undefined }) as DoubaoProvider;
     const result = await provider.synthesizeLongText(
-      { text: fullText, voiceId, voiceParams, format: config.audioFormat ?? 'mp3', sampleRate: config.sampleRate ?? 24000 },
+      { text: fullText, voiceId, voiceModel, voiceParams, format: config.audioFormat ?? 'mp3', sampleRate: config.sampleRate ?? 24000 },
       (stage) => send('progress', { stage }),
     );
     send('done', { audioUrl: result.audioUrl });

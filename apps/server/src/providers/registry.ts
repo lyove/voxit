@@ -13,10 +13,10 @@ import { DoubaoProvider } from './doubao.provider.js';
 /** 根据凭证创建 Provider 实例（每次独立，不全局注册） */
 export function initProvider(
   provider: VxProvider,
-  config: { apiKey: string; workspaceId: string },
+  config: { apiKey: string; workspaceId: string; resourceId?: string; defaultModel?: string },
 ): TTSProvider {
   if (provider === VxProvider.ALIYUN) {
-    return new AliyunProvider(config);
+    return new AliyunProvider({ apiKey: config.apiKey, workspaceId: config.workspaceId, defaultModel: config.defaultModel });
   }
   if (provider === VxProvider.DOUBAO) {
     return new DoubaoProvider(config);
@@ -30,7 +30,7 @@ export function getCapabilities(provider: VxProvider) {
     return new AliyunProvider({ apiKey: '', workspaceId: '' }).getCapabilities();
   }
   if (provider === VxProvider.DOUBAO) {
-    return new DoubaoProvider({ apiKey: '', workspaceId: '' }).getCapabilities();
+    return new DoubaoProvider({ apiKey: '' }).getCapabilities();
   }
   throw new Error(`Provider ${provider} 暂未实现`);
 }

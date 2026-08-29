@@ -18,7 +18,7 @@ import {
 } from '../db/repository.js';
 import { initProvider } from '../providers/registry.js';
 import { getProviderCredentials } from '../config.js';
-import { resolveProviderConfig, synthesizeParagraphById } from '../services/synthesize.js';
+import { resolveProviderConfig, resolveVoiceProvider, synthesizeParagraphById } from '../services/synthesize.js';
 import { sendError } from './error-utils.js';
 
 export const paragraphRoutes = Router();
@@ -28,28 +28,27 @@ paragraphRoutes.get('/:chapterId', (req, res) => {
   res.json(getParagraphs(req.params.chapterId));
 });
 
-/** 创建段落 */
+/** 创建段落（统一为角色段落，旁白是默认角色） */
 paragraphRoutes.post('/', (req, res) => {
-  const { chapterId, text, role, characterName } = req.body as {
+  const { chapterId, text, characterName } = req.body as {
     chapterId: string;
     text: string;
-    role: VxRole;
     characterName?: string;
   };
-  if (!chapterId || !role) {
-    res.status(400).json({ error: '需要 chapterId 和 role' });
+  if (!chapterId) {
+    res.status(400).json({ error: '需要 chapterId' });
     return;
   }
-  let p = createParagraph(chapterId, text, role, characterName);
+  // 未指定角色名时默认为"旁白"（书籍默认角色）
+  const finalName = (characterName ?? '').trim() || '旁白';
+  let p = createParagraph(chapterId, text, VxRole.CHARACTER, finalName);
 
-  // 角色段落：自动套用项目内同名角色模板（填入 voiceId + voiceParams）
-  if (role === 'character' && characterName) {
-    const projectId = listProjects().find((proj) => proj.chapters.some((c) => c.id === chapterId))?.id;
-    if (projectId) {
-      const tpl = findTemplate(projectId, characterName);
-      if (tpl) {
-        p = updateParagraph(p.id, { voiceId: tpl.voiceId, voiceParams: tpl.voiceParams }) ?? p;
-      }
+  // 自动套用项目内同名角色模板（填入 voiceId + voiceParams）
+  const projectId = listProjects().find((proj) => proj.chapters.some((c) => c.id === chapterId))?.id;
+  if (projectId) {
+    const tpl = findTemplate(projectId, finalName);
+    if (tpl && tpl.voiceId) {
+      p = updateParagraph(p.id, { voiceId: tpl.voiceId, voiceModel: tpl.voiceModel, voiceParams: tpl.voiceParams }) ?? p;
     }
   }
   res.status(201).json(p);
@@ -114,11 +113,14 @@ paragraphRoutes.post('/:id/preview', async (req, res) => {
       res.status(400).json({ error: '无法定位书籍 Provider 配置' });
       return;
     }
-    const { apiKey, workspaceId } = getProviderCredentials(config.provider);
-    const provider = initProvider(config.provider, { apiKey, workspaceId });
+    // 跨 Provider 混用：按 voiceId 归属路由 Provider，未知音色回退到书籍 Provider
+    const voiceProvider = await resolveVoiceProvider(para.voiceId, config.provider);
+    const { apiKey, workspaceId, resourceId, defaultModel } = getProviderCredentials(voiceProvider);
+    const provider = initProvider(voiceProvider, { apiKey, workspaceId, resourceId, defaultModel });
     const result = await provider.preview({
       text: para.text,
       voiceId: para.voiceId,
+      voiceModel: para.voiceModel,
       voiceParams: para.voiceParams,
       format: config.audioFormat ?? 'wav',
       sampleRate: config.sampleRate ?? 24000,

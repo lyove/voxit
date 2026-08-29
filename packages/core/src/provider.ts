@@ -20,6 +20,8 @@ export interface VxSynthesizeInput {
   text: string;
   /** 发音人 ID（Provider 原生） */
   voiceId: string;
+  /** 所属合成模型（Provider 内部多模型时必填，如阿里云 cosyvoice-v3-flash） */
+  voiceModel?: string;
   /** 性格参数（统一模型） */
   voiceParams?: VxVoiceParams;
   /** 音频格式 */
@@ -64,6 +66,8 @@ export interface VxProviderCapabilities {
   supportsStreaming: boolean;
   /** 是否支持异步长文本（整章一次性） */
   supportsLongText: boolean;
+  /** 支持的合成模型列表（如阿里云的 cosyvoice-v3-flash、qwen-tts；豆包的 seed-tts-2.0） */
+  availableModels?: string[];
 }
 
 /**

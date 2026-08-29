@@ -25,6 +25,8 @@ export function createProject(name: string, providerConfig: VxProviderConfig, de
   db.prepare(
     `INSERT INTO vx_projects (id, name, description, provider_config, created_at, updated_at) VALUES (?,?,?,?,?,?)`,
   ).run(id, name, description ?? '', JSON.stringify(providerConfig), ts, ts);
+  // 默认角色模板：旁白（普通角色，可编辑/删除）
+  upsertTemplate(id, '旁白', '', undefined, undefined);
   return { id, name, description, providerConfig, chapters: [], createdAt: ts, updatedAt: ts };
 }
 
@@ -151,6 +153,23 @@ export function getParagraphs(chapterId: string): VxParagraph[] {
   return rows.map(rowToParagraph);
 }
 
+interface ParagraphRow {
+  id: string;
+  chapter_id: string;
+  index: number;
+  text: string;
+  role: string;
+  character_name: string | null;
+  voice_id: string | null;
+  voice_model: string | null;
+  voice_params: string | null;
+  audio_url: string | null;
+  status: string;
+  error: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 export function getParagraph(id: string): VxParagraph | undefined {
   const db = getDb();
   const row = db.prepare(`SELECT * FROM vx_paragraphs WHERE id = ?`).get(id) as ParagraphRow | undefined;
@@ -163,12 +182,13 @@ export function updateParagraph(id: string, patch: Partial<VxParagraph>): VxPara
   if (!cur) return undefined;
   const merged = { ...cur, ...patch, updatedAt: now() };
   db.prepare(
-    `UPDATE vx_paragraphs SET text=?, role=?, character_name=?, voice_id=?, voice_params=?, audio_url=?, status=?, error=?, updated_at=? WHERE id=?`,
+    `UPDATE vx_paragraphs SET text=?, role=?, character_name=?, voice_id=?, voice_model=?, voice_params=?, audio_url=?, status=?, error=?, updated_at=? WHERE id=?`,
   ).run(
     merged.text,
     merged.role,
     merged.characterName ?? null,
     merged.voiceId ?? null,
+    merged.voiceModel ?? null,
     merged.voiceParams ? JSON.stringify(merged.voiceParams) : null,
     merged.audioUrl ?? null,
     merged.status,
@@ -188,6 +208,7 @@ function rowToParagraph(r: ParagraphRow): VxParagraph {
     role: r.role as VxRole,
     characterName: r.character_name ?? undefined,
     voiceId: r.voice_id ?? undefined,
+    voiceModel: r.voice_model ?? undefined,
     voiceParams: r.voice_params ? JSON.parse(r.voice_params) : undefined,
     audioUrl: r.audio_url ?? undefined,
     status: r.status as VxParagraphStatus,
@@ -199,8 +220,6 @@ function rowToParagraph(r: ParagraphRow): VxParagraph {
 
 interface ProjectRow { id: string; name: string; description: string; provider_config: string; created_at: number; updated_at: number; }
 interface ChapterRow { id: string; project_id: string; index: number; title: string; created_at: number; updated_at: number; }
-interface ParagraphRow { id: string; chapter_id: string; index: number; text: string; role: string; character_name: string | null; voice_id: string | null; voice_params: string | null; audio_url: string | null; status: string; error: string | null; created_at: number; updated_at: number; }
-
 // ============ Voice Template ============
 
 export function listTemplates(projectId: string): VxVoiceTemplate[] {
@@ -213,22 +232,23 @@ export function upsertTemplate(
   projectId: string,
   characterName: string,
   voiceId: string,
+  voiceModel?: string,
   voiceParams?: import('@voxit/core').VxVoiceParams,
 ): VxVoiceTemplate {
   const db = getDb();
   const ts = now();
   const existing = db.prepare(`SELECT id, created_at FROM vx_voice_templates WHERE project_id = ? AND character_name = ?`).get(projectId, characterName) as { id: string; created_at: number } | undefined;
   if (existing) {
-    db.prepare(`UPDATE vx_voice_templates SET voice_id=?, voice_params=?, updated_at=? WHERE id=?`).run(
-      voiceId, voiceParams ? JSON.stringify(voiceParams) : null, ts, existing.id,
+    db.prepare(`UPDATE vx_voice_templates SET voice_id=?, voice_model=?, voice_params=?, updated_at=? WHERE id=?`).run(
+      voiceId, voiceModel ?? null, voiceParams ? JSON.stringify(voiceParams) : null, ts, existing.id,
     );
-    return { id: existing.id, projectId, characterName, voiceId, voiceParams, createdAt: existing.created_at, updatedAt: ts };
+    return { id: existing.id, projectId, characterName, voiceId, voiceModel, voiceParams, createdAt: existing.created_at, updatedAt: ts };
   }
   const id = uuid();
-  db.prepare(`INSERT INTO vx_voice_templates (id, project_id, character_name, voice_id, voice_params, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`).run(
-    id, projectId, characterName, voiceId, voiceParams ? JSON.stringify(voiceParams) : null, ts, ts,
+  db.prepare(`INSERT INTO vx_voice_templates (id, project_id, character_name, voice_id, voice_model, voice_params, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`).run(
+    id, projectId, characterName, voiceId, voiceModel ?? null, voiceParams ? JSON.stringify(voiceParams) : null, ts, ts,
   );
-  return { id, projectId, characterName, voiceId, voiceParams, createdAt: ts, updatedAt: ts };
+  return { id, projectId, characterName, voiceId, voiceModel, voiceParams, createdAt: ts, updatedAt: ts };
 }
 
 export function deleteTemplate(id: string): void {
@@ -256,10 +276,11 @@ function rowToTemplate(r: TemplateRow): VxVoiceTemplate {
     projectId: r.project_id,
     characterName: r.character_name,
     voiceId: r.voice_id,
+    voiceModel: r.voice_model ?? undefined,
     voiceParams: r.voice_params ? JSON.parse(r.voice_params) : undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-interface TemplateRow { id: string; project_id: string; character_name: string; voice_id: string; voice_params: string | null; created_at: number; updated_at: number; }
+interface TemplateRow { id: string; project_id: string; character_name: string; voice_id: string; voice_model: string | null; voice_params: string | null; created_at: number; updated_at: number; }

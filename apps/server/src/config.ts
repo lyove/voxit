@@ -63,23 +63,31 @@ export const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? 'http://localhost:5173'
  * 读取某 Provider 的全局凭证。
  * 语义映射（复用 TTSProvider 统一字段）：
  * - 阿里云：apiKey=API Key，workspaceId=Workspace ID
- * - 豆包：apiKey=access_token，workspaceId=appid
+ * - 豆包：apiKey=新版 API Key（控制台 > API管理 获取），无需 workspaceId
  */
-export function getProviderCredentials(provider: VxProvider): { apiKey: string; workspaceId: string } {
+export function getProviderCredentials(provider: VxProvider): { apiKey: string; workspaceId: string; resourceId?: string; defaultModel?: string } {
   let apiKey = '';
   let workspaceId = '';
+  let resourceId: string | undefined;
   if (provider === VxProvider.ALIYUN) {
     apiKey = process.env.ALIYUN_API_KEY ?? '';
     workspaceId = process.env.ALIYUN_WORKSPACE_ID ?? '';
+    return { apiKey, workspaceId, defaultModel: process.env.ALIYUN_MODEL };
   } else if (provider === VxProvider.DOUBAO) {
-    apiKey = process.env.DOUBAO_TOKEN ?? '';
-    workspaceId = process.env.DOUBAO_APP_ID ?? '';
+    // 新版鉴权：仅需 API Key，不再需要 APP ID / Access Token
+    apiKey = process.env.DOUBAO_API_KEY ?? '';
+    // V3 语音模型资源 ID（.env: DOUBAO_RESOURCE_ID，豆包语音合成 2.0 为 seed-tts-2.0）
+    resourceId = process.env.DOUBAO_RESOURCE_ID || undefined;
   } else {
     throw new Error(`Provider ${provider} 暂未实现`);
   }
-  if (!apiKey || !workspaceId) {
-    const label = provider === VxProvider.ALIYUN ? '阿里云百炼' : provider === VxProvider.DOUBAO ? '火山引擎豆包' : provider;
+  const label = '豆包火山引擎';
+  if (provider === VxProvider.DOUBAO) {
+    if (!apiKey) {
+      throw new Error(`供应商「${label}」未在服务器 .env 中配置 DOUBAO_API_KEY，请在 apps/server/.env 中设置后重启`);
+    }
+  } else if (!apiKey || !workspaceId) {
     throw new Error(`供应商「${label}」未在服务器 .env 中配置凭证，请在 apps/server/.env 中设置后重启`);
   }
-  return { apiKey, workspaceId };
+  return { apiKey, workspaceId, resourceId };
 }

@@ -4,12 +4,12 @@
 
 ## 核心功能
 
-- **多 AI 供应商**：支持阿里云百炼（CosyVoice/Qwen-TTS）、火山引擎豆包（Seed-TTS），可在系统设置中配置多个大模型实例
+- **多 AI 供应商**：支持阿里云百炼（CosyVoice/Qwen-TTS）、豆包火山引擎（Seed-TTS），可在系统设置中配置多个大模型实例
 - **书籍管理**：书籍列表（Table 展示、搜索、编辑）、书籍详情（章节/角色双 Tab）
 - **章节管理**：章节列表（状态追踪：初始化/编辑中/已合成）、章节详情（段落编辑）
 - **段落编辑**：左右布局，左侧选角色（旁白/角色）+ 编辑角色发音人，右侧文本编辑 + 语速/音调/情感/指令参数 + 试听/合成
 - **角色管理**：书籍级角色配置（角色名→发音人映射），段落选角色时自动套用发音人
-- **发音人试听**：AI角色页展示所有发音人，可试听；发音人选择下拉每项带试听按钮，先试听后选择
+- **发音人试听**：AI音色页展示所有发音人，可试听；发音人选择下拉每项带试听按钮，先试听后选择
 - **批量合成**：一键合成整章段落，SSE 实时进度推送
 - **整章导出**：ffmpeg 拼接各段音频 + 段间静音，导出整章 mp3
 - **豆包长文本**：整章文本一次性合成（异步，最多 10 万字）
@@ -24,7 +24,7 @@
 | 后端 | Node.js + Express + TypeScript |
 | 数据库 | node:sqlite（Node 24 内置，零编译依赖） |
 | 音频处理 | ffmpeg-static + fluent-ffmpeg |
-| TTS | 阿里云百炼 CosyVoice、火山引擎豆包 Seed-TTS |
+| TTS | 阿里云百炼 CosyVoice、豆包火山引擎 Seed-TTS |
 
 ## 项目结构
 
@@ -34,7 +34,7 @@ voxit/
 │   ├── web/                 # 前端（React + Vite）
 │   │   └── src/
 │   │       ├── layouts/     # 侧边栏布局
-│   │       ├── pages/       # 路由页面（数据面板/书籍/章节/AI角色/设置）
+│   │       ├── pages/       # 路由页面（数据面板/书籍/章节/AI音色/设置）
 │   │       ├── components/  # 组件（段落卡片/发音人选择器/模板面板）
 │   │       ├── store.ts     # 全局状态
 │   │       └── ai-config.ts # AI 大模型配置（localStorage 持久化）
@@ -72,8 +72,8 @@ npm run dev:web       # http://localhost:5173
 
 ### 配置 AI 大模型
 
-1. 进入「系统设置」→ 配置阿里云百炼 / 火山引擎豆包的 API Key 和 Workspace ID
-2. 进入「AI角色」→ 自动从大模型拉取发音人列表
+1. 进入「系统设置」→ 配置阿里云百炼 / 豆包火山引擎的 API Key 和 Workspace ID
+2. 进入「AI音色」→ 自动从大模型拉取发音人列表
 3. 创建书籍 → 新增章节 → 编辑段落 → 选角色/发音人 → 试听 → 合成 → 导出
 
 ## 生产部署
@@ -171,6 +171,27 @@ certbot --nginx -d your-domain.com
 | `/api/paragraphs` | GET/POST/PATCH | 段落 CRUD + 合成 + 试听 |
 | `/api/providers` | GET | 供应商列表 + 能力 + 发音人 + 试听 |
 | `/api/templates` | GET/POST/DELETE | 角色发音人模板 CRUD |
+
+
+## TTS相关文档
+
+### 阿里云相关文档：
+- 实时语音合成：[https://help.aliyun.com/zh/model-studio/realtime-tts-user-guide](https://help.aliyun.com/zh/model-studio/realtime-tts-user-guide)  
+- 非实时语音合成：[https://help.aliyun.com/zh/model-studio/non-realtime-tts-user-guide](https://help.aliyun.com/zh/model-studio/non-realtime-tts-user-guide)  
+- 声音复刻：[https://help.aliyun.com/zh/model-studio/voice-cloning-user-guide](https://help.aliyun.com/zh/model-studio/voice-cloning-user-guide)  
+- 声音设计：[https://help.aliyun.com/zh/model-studio/voice-design-user-guide](https://help.aliyun.com/zh/model-studio/voice-design-user-guide)  
+- SSML 与 LaTeX：[https://help.aliyun.com/zh/model-studio/ssml-latex-user-guide](https://help.aliyun.com/zh/model-studio/ssml-latex-user-guide)  
+- 音色列表：
+  - Qwen-Audio-TTS音色列表：[https://help.aliyun.com/zh/model-studio/qwen-audio-tts-voice-list](https://help.aliyun.com/zh/model-studio/qwen-audio-tts-voice-list)  
+  - CosyVoice音色列表：[https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list](https://help.aliyun.com/zh/model-studio/cosyvoice-voice-list)  
+  - Qwen-TTS音色列表：[https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list](https://help.aliyun.com/zh/model-studio/qwen-tts-voice-list)  
+
+
+### 豆包火山引擎相关文档：
+- 豆包语音文档指南：[https://docs.volcengine.com/docs/6561](https://docs.volcengine.com/docs/6561)  
+  - 模型列表：[https://docs.volcengine.com/docs/6561/2499930](https://docs.volcengine.com/docs/6561/2499930/)  
+  - 音色列表：[https://docs.volcengine.com/docs/6561/1257544](https://docs.volcengine.com/docs/6561/1257544)  
+- API参考：[https://docs.volcengine.com/docs/6561/1257536](https://docs.volcengine.com/docs/6561/1257536)
 
 ## License
 

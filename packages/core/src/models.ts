@@ -10,9 +10,8 @@ export enum VxProvider {
   DOUBAO = 'doubao',
 }
 
-/** 段落角色：旁白 / 角色 */
+/** 段落角色标记：统一为 CHARACTER，角色名存 characterName（不再区分旁白/角色） */
 export enum VxRole {
-  NARRATION = 'narration',
   CHARACTER = 'character',
 }
 
@@ -91,6 +90,8 @@ export interface VxVoice {
   name: string;
   /** 所属 Provider */
   provider: VxProvider;
+  /** 所属合成模型（阿里云 cosyvoice-v3-flash / qwen-tts 等；豆包 seed-tts-2.0 等） */
+  model?: string;
   /** 性别 */
   gender?: VxVoiceGender;
   /** 年龄档 */
@@ -113,12 +114,14 @@ export interface VxParagraph {
   index: number;
   /** 段落文本（可编辑） */
   text: string;
-  /** 旁白 / 角色 */
+  /** 角色标记（统一为 character） */
   role: VxRole;
-  /** 角色名（role=character 时填写，如"林黛玉"） */
+  /** 角色名（如"旁白"、"林黛玉"） */
   characterName?: string;
   /** 该段选用的发音人 ID */
   voiceId?: string;
+  /** 该段选用的合成模型 */
+  voiceModel?: string;
   /** 性格参数 */
   voiceParams?: VxVoiceParams;
   /** 合成产物音频 URL（本地或远端） */
@@ -150,8 +153,6 @@ export interface VxProviderConfig {
   apiKey?: string;
   /** 阿里云：Workspace ID；豆包：appid */
   workspaceId?: string;
-  /** 默认旁白发音人 ID */
-  defaultNarrationVoiceId?: string;
   /** 默认音频格式 */
   audioFormat?: VxAudioFormat;
   /** 默认采样率 */
@@ -180,6 +181,8 @@ export interface VxVoiceTemplate {
   characterName: string;
   /** 发音人 ID */
   voiceId: string;
+  /** 合成模型 */
+  voiceModel?: string;
   /** 性格参数 */
   voiceParams?: VxVoiceParams;
   createdAt: number;

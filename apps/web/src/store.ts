@@ -2,6 +2,7 @@
  * 全局状态管理（zustand）
  */
 import { create } from 'zustand';
+import { VxProvider } from '@voxit/core';
 import type { VxParagraph, VxProject, VxVoice } from '@voxit/core';
 import * as api from './api.js';
 
@@ -18,11 +19,12 @@ interface VxStore {
   addProject: (name: string, provider: VxProject['providerConfig']) => Promise<void>;
   editProject: (id: string, patch: { name?: string; description?: string; providerConfig?: VxProject['providerConfig'] }) => Promise<void>;
   removeProject: (id: string) => Promise<void>;
-  loadVoices: (provider: string) => Promise<void>;
+  /** 加载全部已配置 Provider 的音色（合并展示，支持跨 Provider 混用） */
+  loadAllVoices: () => Promise<void>;
 
   // 段落操作（直接更新本地 currentProject 中的段落，乐观更新）
   updateParagraphLocal: (id: string, patch: Partial<VxParagraph>) => void;
-  addParagraph: (chapterId: string, text: string, role: 'narration' | 'character', characterName?: string) => Promise<void>;
+  addParagraph: (chapterId: string, text: string, characterName?: string) => Promise<void>;
   /** 标记章节为脏（有未保存改动） */
   markChapterDirty: (chapterId: string) => void;
   /** 清除章节脏标记（保存后） */
@@ -69,9 +71,13 @@ export const useStore = create<VxStore>((set, get) => ({
     });
   },
 
-  loadVoices: async (provider) => {
-    const voices = await api.fetchVoices(provider as any);
-    set({ voices });
+  loadAllVoices: async () => {
+    // 加载所有 Provider 的音色，某个未配置凭证则忽略（保持已配置的音色可用）
+    const [aliyun, doubao] = await Promise.all([
+      api.fetchVoices(VxProvider.ALIYUN).catch(() => []),
+      api.fetchVoices(VxProvider.DOUBAO).catch(() => []),
+    ]);
+    set({ voices: [...aliyun, ...doubao] });
   },
 
   updateParagraphLocal: (id, patch) => {
@@ -95,8 +101,8 @@ export const useStore = create<VxStore>((set, get) => ({
     if (dirtyChapterId) get().markChapterDirty(dirtyChapterId);
   },
 
-  addParagraph: async (chapterId, text, role, characterName) => {
-    const p = await api.createParagraph(chapterId, text, role as any, characterName);
+  addParagraph: async (chapterId, text, characterName) => {
+    const p = await api.createParagraph(chapterId, text, characterName ?? '旁白');
     const proj = get().currentProject;
     if (!proj) return;
     set({

@@ -1,11 +1,11 @@
 /**
- * AI角色页
+ * AI音色页
  */
 import { useEffect, useRef, useState } from 'react';
-import { Button, Card, Col, Empty, Input, Row, Spin, Tag, message } from 'antd';
-import { PauseCircleOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { Button, Card, Col, Empty, Input, Row, Select, Spin, Tag, message } from 'antd';
+import { PauseCircleOutlined, PlayCircleOutlined, SearchOutlined } from '@ant-design/icons';
 import { VxProvider, type VxVoice } from '@voxit/core';
-import { fetchVoices, http, extractError, normalizeAudioUrl } from '../api.js';
+import { fetchCapabilities, fetchVoices, http, extractError, normalizeAudioUrl } from '../api.js';
 
 /** 随机小说段落示例 */
 const SAMPLE_TEXTS = [
@@ -16,9 +16,32 @@ const SAMPLE_TEXTS = [
   '他缓缓拔出长剑，剑身在月光下泛着冷光。对面的黑影动了，一场宿命之战即将开始。',
 ];
 
+/** 板块主题色：不同 AI 大模型用不同颜色区分 */
+interface SectionTheme {
+  /** 主色（标题色块、标题文字） */
+  color: string;
+  /** 板块背景色 */
+  bg: string;
+  /** 板块边框色 */
+  border: string;
+}
+
+/** 阿里云百炼：蓝色系 */
+const ALIYUN_THEME: SectionTheme = { color: '#1677ff', bg: '#f0f7ff', border: '#91caff' };
+/** 豆包火山引擎：紫色系 */
+const DOUBAO_THEME: SectionTheme = { color: '#722ed1', bg: '#f9f0ff', border: '#d3adf7' };
+
 export default function AiVoices() {
   const [aliyunVoices, setAliyunVoices] = useState<VxVoice[]>([]);
   const [doubaoVoices, setDoubaoVoices] = useState<VxVoice[]>([]);
+  // 模型列表来自 capabilities.availableModels（音色列表中可能缺无系统音色的模型，如 v3.5）
+  const [aliyunModels, setAliyunModels] = useState<string[]>([]);
+  const [doubaoModels, setDoubaoModels] = useState<string[]>([]);
+  const [aliyunModel, setAliyunModel] = useState<string>('');
+  const [doubaoModel, setDoubaoModel] = useState<string>('');
+  // 每个大模型板块独立的音色搜索关键词
+  const [aliyunKeyword, setAliyunKeyword] = useState('');
+  const [doubaoKeyword, setDoubaoKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [sampleText, setSampleText] = useState(SAMPLE_TEXTS[0]);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -36,11 +59,23 @@ export default function AiVoices() {
     setSampleText(SAMPLE_TEXTS[Math.floor(Math.random() * SAMPLE_TEXTS.length)]);
     setLoading(true);
     Promise.all([
+      fetchCapabilities(VxProvider.ALIYUN).then((c) => c.availableModels ?? []).catch(() => []),
+      fetchCapabilities(VxProvider.DOUBAO).then((c) => c.availableModels ?? []).catch(() => []),
       fetchVoices(VxProvider.ALIYUN).catch(() => []),
       fetchVoices(VxProvider.DOUBAO).catch(() => []),
-    ]).then(([a, d]) => {
+    ]).then(([am, dm, a, d]) => {
+      // 模型列表以 capabilities 为准，并兜底并入音色中出现的模型
+      const amSet = new Set([...am, ...a.map((v) => v.model).filter((m): m is string => !!m)]);
+      const dmSet = new Set([...dm, ...d.map((v) => v.model).filter((m): m is string => !!m)]);
+      setAliyunModels([...amSet]);
+      setDoubaoModels([...dmSet]);
       setAliyunVoices(a);
       setDoubaoVoices(d);
+      // 默认选择 cosyvoice-v3-flash（v3.5 官方无系统音色，无法试听，故不作为默认）
+      setAliyunModel((prev) =>
+        prev || (amSet.has('cosyvoice-v3-flash') ? 'cosyvoice-v3-flash' : [...amSet][0] || '')
+      );
+      setDoubaoModel((prev) => prev || [...dmSet][0] || '');
     }).finally(() => setLoading(false));
   }, []);
 
@@ -59,6 +94,7 @@ export default function AiVoices() {
       const resp = await http.post(`/providers/${voice.provider}/preview`, {
         text: sampleText,
         voiceId: voice.id,
+        voiceModel: voice.model,
         format: 'wav',
         sampleRate: 24000,
       });
@@ -109,11 +145,100 @@ export default function AiVoices() {
   );
   };
 
+  /** 按关键词过滤音色（匹配名称 / ID / 描述） */
+  const filterByKeyword = (voices: VxVoice[], keyword: string) => {
+    const k = keyword.trim().toLowerCase();
+    if (!k) return voices;
+    return voices.filter(
+      (v) =>
+        v.name.toLowerCase().includes(k) ||
+        v.id.toLowerCase().includes(k) ||
+        (v.description ?? '').toLowerCase().includes(k),
+    );
+  };
+
+  /** 模型无音色时的提示（如 v3.5 官方不支持系统音色） */
+  const renderNoSystemVoice = (model: string) => (
+    <Empty
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={model.startsWith('cosyvoice-v3.5')
+        ? '该模型不支持系统音色（官方限制：v3.5 仅支持声音复刻/声音设计音色），请切换其他模型'
+        : '该模型暂无可用的系统音色'}
+      style={{ marginTop: 24 }}
+    />
+  );
+
+  // 各板块：先按合成模型过滤，再按各自的关键词过滤
+  const aliyunModelVoices = aliyunModel ? aliyunVoices.filter((v) => v.model === aliyunModel) : aliyunVoices;
+  const filteredAliyun = filterByKeyword(aliyunModelVoices, aliyunKeyword);
+  const doubaoModelVoices = doubaoModel ? doubaoVoices.filter((v) => v.model === doubaoModel) : doubaoVoices;
+  const filteredDoubao = filterByKeyword(doubaoModelVoices, doubaoKeyword);
+
   const noVoice = aliyunVoices.length === 0 && doubaoVoices.length === 0;
+
+  /** 渲染单个 AI 大模型板块（主题色 + 模型下拉 + 独立音色搜索） */
+  const renderSection = (props: {
+    title: string;
+    theme: SectionTheme;
+    model: string;
+    models: string[];
+    onModelChange: (m: string) => void;
+    keyword: string;
+    onKeywordChange: (k: string) => void;
+    modelVoices: VxVoice[];
+    filteredVoices: VxVoice[];
+  }) => {
+    const { title, theme, model, models, onModelChange, keyword, onKeywordChange, modelVoices, filteredVoices } = props;
+    const keywordEmpty = filteredVoices.length === 0 && modelVoices.length > 0;
+    return (
+      <div style={{
+        padding: 16,
+        borderRadius: 8,
+        border: `1px solid ${theme.border}`,
+        background: theme.bg,
+        marginBottom: 24,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <h3 style={{ margin: 0, color: theme.color }}>
+            <span style={{
+              display: 'inline-block',
+              width: 8,
+              height: 16,
+              borderRadius: 2,
+              background: theme.color,
+              marginRight: 8,
+              verticalAlign: -2,
+            }} />
+            {title}（{filteredVoices.length}）
+          </h3>
+          <Select
+            style={{ minWidth: 200 }}
+            placeholder="选择合成模型"
+            value={model || undefined}
+            onChange={onModelChange}
+            options={models.map((m) => ({ label: m, value: m }))}
+          />
+          <Input
+            allowClear
+            prefix={<SearchOutlined style={{ color: '#999' }} />}
+            placeholder="搜索音色"
+            style={{ width: 200 }}
+            value={keyword}
+            onChange={(e) => onKeywordChange(e.target.value)}
+          />
+        </div>
+        {filteredVoices.length > 0
+          ? <Row gutter={16}>{filteredVoices.map(renderVoice)}</Row>
+          : keywordEmpty
+            ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的音色" style={{ marginTop: 24 }} />
+            : renderNoSystemVoice(model)}
+      </div>
+    );
+  };
 
   return (
     <div>
-      <h2>AI角色</h2>
+      <h2>AI音色</h2>
 
       {/* 试听文本输入框 */}
       <Input.TextArea
@@ -127,18 +252,28 @@ export default function AiVoices() {
       {!loading && noVoice && <Empty description="未能拉取到发音人，请检查服务器 .env 中的凭证配置" />}
 
       <Spin spinning={loading}>
-        {aliyunVoices.length > 0 && (
-          <>
-            <h3>阿里云百炼（{aliyunVoices.length}）</h3>
-            <Row gutter={16}>{aliyunVoices.map(renderVoice)}</Row>
-          </>
-        )}
-        {doubaoVoices.length > 0 && (
-          <>
-            <h3 style={{ marginTop: 24 }}>火山引擎豆包（{doubaoVoices.length}）</h3>
-            <Row gutter={16}>{doubaoVoices.map(renderVoice)}</Row>
-          </>
-        )}
+        {aliyunVoices.length > 0 && renderSection({
+          title: '阿里云百炼',
+          theme: ALIYUN_THEME,
+          model: aliyunModel,
+          models: aliyunModels,
+          onModelChange: setAliyunModel,
+          keyword: aliyunKeyword,
+          onKeywordChange: setAliyunKeyword,
+          modelVoices: aliyunModelVoices,
+          filteredVoices: filteredAliyun,
+        })}
+        {doubaoVoices.length > 0 && renderSection({
+          title: '豆包火山引擎',
+          theme: DOUBAO_THEME,
+          model: doubaoModel,
+          models: doubaoModels,
+          onModelChange: setDoubaoModel,
+          keyword: doubaoKeyword,
+          onKeywordChange: setDoubaoKeyword,
+          modelVoices: doubaoModelVoices,
+          filteredVoices: filteredDoubao,
+        })}
       </Spin>
     </div>
   );

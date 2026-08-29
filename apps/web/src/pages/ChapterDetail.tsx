@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
-  Form,
   Input,
   List,
   Modal,
@@ -28,14 +27,15 @@ import {
   VxEmotion,
   VxProvider,
   type VxChapter,
-  VxRole,
+  type VxParagraph,
   type VxVoice,
   type VxVoiceParams,
   type VxProviderCapabilities,
 } from "@voxit/core";
-import * as api from "../api.js";
-import { VoicePicker } from "../components/VoicePicker.js";
-import { useStore } from "../store.js";
+import * as api from "../api";
+import { VoicePicker } from "../components/VoicePicker";
+import { useStore } from "../store";
+import { getRoleColor } from "../utils/roleColors";
 
 const { TextArea } = Input;
 
@@ -60,553 +60,46 @@ const EMOTION_LABELS: Record<VxEmotion, string> = {
   [VxEmotion.CRYING]: "哭泣",
 };
 
-export default function ChapterDetail() {
-  const { bookId, chapterId } = useParams();
-  const navigate = useNavigate();
-  const { currentProject, voices, loadVoices } = useStore.getState();
-  const [chapter, setChapter] = useState<VxChapter | null>(null);
-  const [book, setBook] = useState(currentProject);
-  const [capabilities, setCapabilities] = useState<
-    VxProviderCapabilities | undefined
-  >(undefined);
-  const [bookRoles, setBookRoles] = useState<string[]>([]);
-  const [bookTemplates, setBookTemplates] = useState<any[]>([]);
-  const [editRoleOpen, setEditRoleOpen] = useState(false);
-  const [editingRoleName, setEditingRoleName] = useState<string>("");
-  const [editRoleVoiceId, setEditRoleVoiceId] = useState<string | undefined>();
-  const [rolePreviewing, setRolePreviewing] = useState(false);
-  const [rolePreviewUrl, setRolePreviewUrl] = useState<string | undefined>();
-  // 各段落试听/勾选状态（由 ParagraphRow 上报），用于控制合成按钮可用性
-  const [previewStates, setPreviewStates] = useState<
-    Record<string, { hasPreview: boolean; hasSelected: boolean }>
-  >({});
-  const [batchSynthesizing, setBatchSynthesizing] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{
-    index: number;
-    total: number;
-    success: number;
-    failed: number;
-    skipped: number;
-  } | null>(null);
-  const [editingChapterName, setEditingChapterName] = useState(false);
-  const [chapterNameValue, setChapterNameValue] = useState("");
-  const [narrationEditOpen, setNarrationEditOpen] = useState(false);
-  const [narrationEditParaId, setNarrationEditParaId] = useState<string | null>(
-    null,
-  );
-  const [narrationVoiceId, setNarrationVoiceId] = useState<
-    string | undefined
-  >();
-
-  const load = async () => {
-    if (!bookId) return;
-    const proj = await api.fetchProject(bookId);
-    setBook(proj);
-    useStore.setState({ currentProject: proj });
-    const ch = proj.chapters.find((c) => c.id === chapterId);
-    setChapter(ch ?? null);
-    // 加载 Provider 能力
-    api
-      .fetchCapabilities(proj.providerConfig.provider)
-      .then(setCapabilities)
-      .catch(() => {});
-    // 自动加载发音人（凭证由服务器 .env 提供）
-    try {
-      await loadVoices(proj.providerConfig.provider);
-    } catch {
-      /* 未配置凭证则空 */
-    }
-    // 加载书籍角色模板（角色 tab 里新增的角色），供段落角色下拉使用
-    // 默认确保"旁白"角色存在：即使尚未设置旁白发音人，下拉里也始终有"旁白"可选项
-    try {
-      const tpls = await api.fetchTemplates(bookId);
-      const withNarration = tpls.some((t) => t.characterName === "旁白")
-        ? tpls
-        : [
-            { id: "__narration__", characterName: "旁白", voiceId: undefined },
-            ...tpls,
-          ];
-      setBookTemplates(withNarration);
-      setBookRoles(withNarration.map((t) => t.characterName));
-    } catch {
-      /* ignore */
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, [bookId, chapterId]);
-
-  /** 收集段落行上报的试听/勾选状态（引用相同则不更新，避免多余渲染） */
-  const handlePreviewStateChange = useCallback(
-    (
-      paragraphId: string,
-      state: { hasPreview: boolean; hasSelected: boolean },
-    ) => {
-      setPreviewStates((prev) => {
-        const cur = prev[paragraphId];
-        if (
-          cur &&
-          cur.hasPreview === state.hasPreview &&
-          cur.hasSelected === state.hasSelected
-        ) {
-          return prev;
-        }
-        return { ...prev, [paragraphId]: state };
-      });
-    },
-    [],
-  );
-
-  if (!chapter || !book) return <div>加载中...</div>;
-
-  const chapters = book.chapters;
-  const curIdx = chapters.findIndex((c) => c.id === chapterId);
-  const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null;
-  const nextCh = curIdx < chapters.length - 1 ? chapters[curIdx + 1] : null;
-
-  const handleSaveAll = async () => {
-    for (const p of chapter.paragraphs) {
-      try {
-        await api.updateParagraph(p.id, {
-          text: p.text,
-          role: p.role,
-          characterName: p.characterName,
-          voiceId: p.voiceId,
-          voiceParams: p.voiceParams,
-        });
-      } catch (e) {
-        message.error("保存失败：" + api.extractError(e));
-        return;
-      }
-    }
-    message.success("整章已保存");
-    useStore.getState().clearChapterDirty(chapter.id);
-  };
-
-  /** 双击章节名称编辑 */
-  const handleStartRenameChapter = () => {
-    setChapterNameValue(chapter.title);
-    setEditingChapterName(true);
-  };
-
-  const handleConfirmRenameChapter = async () => {
-    if (!chapterId || !chapterNameValue.trim()) return;
-    try {
-      await api.renameChapter(chapterId, chapterNameValue.trim());
-      setEditingChapterName(false);
-      load();
-    } catch (e) {
-      message.error("重命名失败：" + api.extractError(e));
-    }
-  };
-
-  /** 打开旁白发音人编辑弹框 */
-  const handleEditNarration = () => {
-    setNarrationEditParaId(
-      chapter?.paragraphs.find((p) => p.role === "narration")?.id ?? null,
-    );
-    // 回填：优先从角色模板取，其次取当前章节第一个已设置发音人的旁白段落
-    const narrationTpl = bookTemplates.find((t) => t.characterName === "旁白");
-    const narrationParaWithVoice = chapter?.paragraphs.find(
-      (p) => p.role === "narration" && p.voiceId,
-    );
-    setNarrationVoiceId(
-      narrationTpl?.voiceId ?? narrationParaWithVoice?.voiceId ?? undefined,
-    );
-    setNarrationEditOpen(true);
-  };
-
-  /** 保存旁白发音人（允许清空：不校验是否为空） */
-  const handleSaveNarrationVoice = async () => {
-    // 允许清空：voiceId 为空时保存空字符串，段落发音人清空为 undefined
-    const finalVoiceId = narrationVoiceId ?? "";
-    // 更新当前章节所有旁白段落的发音人
-    for (const p of chapter.paragraphs.filter(
-      (p: any) => p.role === "narration",
-    )) {
-      updateLocal(p.id, { voiceId: finalVoiceId || undefined });
-    }
-    // 同步到 templates（角色名="旁白"），与书籍详情页角色 tab 统一
-    if (bookId) {
-      try {
-        await api.saveTemplate(bookId, "旁白", finalVoiceId);
-        const tpls = await api.fetchTemplates(bookId);
-        setBookTemplates(tpls);
-        setBookRoles(tpls.map((t) => t.characterName));
-      } catch {
-        /* ignore */
-      }
-    }
-    message.success("编辑成功");
-    setNarrationEditOpen(false);
-  };
-
-  /** 打开编辑角色弹框（从段落旁的编辑图标触发） */
-  const handleEditRole = (roleName: string) => {
-    const tpl = bookTemplates.find((t) => t.characterName === roleName);
-    setEditingRoleName(roleName);
-    setEditRoleVoiceId(tpl?.voiceId);
-    setRolePreviewUrl(undefined);
-    setEditRoleOpen(true);
-  };
-
-  /** 保存编辑角色（同步到 templates，允许清空发音人） */
-  const handleSaveEditRole = async () => {
-    if (!bookId || !editingRoleName) {
-      message.warning("请填写角色名");
-      return;
-    }
-    try {
-      // 清空时传空字符串，服务端保存后模板 voiceId 为空，段落不再套用该角色发音人
-      await api.saveTemplate(bookId, editingRoleName, editRoleVoiceId ?? "");
-      message.success("编辑成功");
-      setEditRoleOpen(false);
-      // 刷新 templates
-      const tpls = await api.fetchTemplates(bookId);
-      setBookTemplates(tpls);
-      setBookRoles(tpls.map((t) => t.characterName));
-    } catch (e) {
-      message.error("编辑失败：" + api.extractError(e));
-    }
-  };
-
-  /** 试听编辑角色弹框里的发音人 */
-  const handlePreviewEditRole = async () => {
-    if (!editRoleVoiceId || !book) return;
-    setRolePreviewing(true);
-    try {
-      const resp = await api.http.post(
-        `/providers/${book.providerConfig.provider}/preview`,
-        {
-          text: "夜幕降临，星光闪烁。他独自站在悬崖边，望着远方的城市灯火。",
-          voiceId: editRoleVoiceId,
-          format: "wav",
-          sampleRate: 24000,
-        },
-      );
-      if (resp.data.audioUrl) setRolePreviewUrl(resp.data.audioUrl);
-      else if (resp.data.audioData)
-        setRolePreviewUrl(`data:audio/wav;base64,${resp.data.audioData}`);
-    } catch (e) {
-      message.error("试听失败：" + api.extractError(e));
-    } finally {
-      setRolePreviewing(false);
-    }
-  };
-
-  const handleAddParagraph = async (role: VxRole) => {
-    try {
-      await useStore
-        .getState()
-        .addParagraph(
-          chapter.id,
-          "",
-          role,
-          role === "character" ? "新角色" : undefined,
-        );
-      load();
-    } catch (e) {
-      message.error("新增失败：" + api.extractError(e));
-    }
-  };
-
-  const handleSynthesizeAll = async () => {
-    message.info("一键合成功能开发中")
-    // setBatchSynthesizing(true);
-    // setBatchProgress({
-    //   index: 0,
-    //   total: chapter.paragraphs.length,
-    //   success: 0,
-    //   failed: 0,
-    //   skipped: 0,
-    // });
-    // try {
-    //   await api.synthesizeAllStream(chapter.id, (e) => {
-    //     setBatchProgress({
-    //       index: e.index,
-    //       total: e.total,
-    //       success: e.success,
-    //       failed: e.failed,
-    //       skipped: e.skipped,
-    //     });
-    //     if (e.type === "done" && e.result)
-    //       message.success(
-    //         `合成完成：成功${e.result.success} 失败${e.result.failed} 跳过${e.result.skipped}`,
-    //       );
-    //   });
-    //   load();
-    // } catch (e) {
-    //   message.error("合成失败：" + api.extractError(e));
-    // } finally {
-    //   setBatchSynthesizing(false);
-    //   setBatchProgress(null);
-    // }
-  };
-
-  const updateLocal = (
-    id: string,
-    patch: Partial<(typeof chapter.paragraphs)[0]>,
-  ) => {
-    setChapter((ch) =>
-      ch
-        ? {
-            ...ch,
-            paragraphs: ch.paragraphs.map((p) =>
-              p.id === id ? { ...p, ...patch } : p,
-            ),
-          }
-        : null,
-    );
-    useStore.getState().markChapterDirty(chapter.id);
-  };
-
-  return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
-        <Space>
-          <Button
-            type="link"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate(`/books/${bookId}`)}
-          />
-          <span style={{ color: "#999" }}>{book.name}</span>
-        </Space>
-        <Space>
-          {editingChapterName ? (
-            <Input
-              size="small"
-              style={{ width: 200 }}
-              value={chapterNameValue}
-              onChange={(e) => setChapterNameValue(e.target.value)}
-              onPressEnter={handleConfirmRenameChapter}
-              onBlur={handleConfirmRenameChapter}
-              autoFocus
-            />
-          ) : (
-            <span
-              style={{ fontSize: 18, fontWeight: 600, cursor: "pointer" }}
-              onDoubleClick={handleStartRenameChapter}
-              title="双击编辑章节名称"
-            >
-              {chapter.title}
-            </span>
-          )}
-        </Space>
-        <Space>
-          <Button type="primary" onClick={handleSaveAll}>
-            保存
-          </Button>
-          <Button
-            disabled={!prevCh}
-            onClick={() =>
-              prevCh && navigate(`/books/${bookId}/chapters/${prevCh.id}`)
-            }
-          >
-            上一章
-          </Button>
-          <Button
-            disabled={!nextCh}
-            onClick={() =>
-              nextCh && navigate(`/books/${bookId}/chapters/${nextCh.id}`)
-            }
-          >
-            下一章
-          </Button>
-        </Space>
-      </div>
-
-      {/* 按钮行 */}
-      <Space style={{ marginBottom: 16 }}>
-        <Button size="small" onClick={() => message.info("导入文本开发中")}>
-          导入文本
-        </Button>
-        <Button
-          size="small"
-          type="primary"
-          onClick={() => handleAddParagraph(VxRole.NARRATION)}
-        >
-          新增段落
-        </Button>
-        <Tooltip
-          title={
-            chapter.paragraphs.length === 0 ||
-            chapter.paragraphs.every((p) => {
-              const st = previewStates[p.id];
-              return st?.hasPreview && st?.hasSelected;
-            })
-              ? undefined
-              : "所有段落都需先试听并勾选各自的音频"
-          }
-        >
-          <Button
-            size="small"
-            loading={batchSynthesizing}
-            disabled={
-              chapter.paragraphs.length === 0 ||
-              !chapter.paragraphs.every((p) => {
-                const st = previewStates[p.id];
-                return st?.hasPreview && st?.hasSelected;
-              })
-            }
-            onClick={handleSynthesizeAll}
-          >
-            一键合成
-          </Button>
-        </Tooltip>
-        <Button size="small" onClick={() => message.info("导出成品开发中")}>
-          导出成品
-        </Button>
-      </Space>
-
-      {batchProgress && (
-        <Progress
-          percent={
-            batchProgress.total
-              ? Math.round((batchProgress.index / batchProgress.total) * 100)
-              : 0
-          }
-          status={batchSynthesizing ? "active" : "normal"}
-          format={() =>
-            `${batchProgress.index}/${batchProgress.total} · 成功${batchProgress.success} 失败${batchProgress.failed} 跳过${batchProgress.skipped}`
-          }
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      {/* 段落列表：左右布局 */}
-      {chapter.paragraphs.length === 0 && (
-        <div style={{ color: "#999" }}>暂无段落，点击上方按钮添加</div>
-      )}
-      {chapter.paragraphs.map((p, i) => (
-        <ParagraphRow
-          key={p.id}
-          paragraph={p}
-          index={i}
-          voices={voices}
-          capabilities={capabilities}
-          bookRoles={bookRoles}
-          bookTemplates={bookTemplates}
-          provider={book.providerConfig.provider}
-          onUpdate={(patch) => updateLocal(p.id, patch)}
-          onEditRole={handleEditRole}
-          onEditNarration={handleEditNarration}
-          onPreviewStateChange={handlePreviewStateChange}
-        />
-      ))}
-
-      {/* 编辑角色弹框（从段落旁编辑图标触发） */}
-      <Modal
-        title={`编辑角色：${editingRoleName}`}
-        open={editRoleOpen}
-        onCancel={() => setEditRoleOpen(false)}
-        onOk={handleSaveEditRole}
-        okText="保存"
-        destroyOnHidden
-      >
-        <Space direction="vertical" style={{ width: "100%" }} size="middle">
-          <div>
-            <label style={{ display: "block", marginBottom: 4 }}>角色名</label>
-            <Input value={editingRoleName} disabled />
-          </div>
-          <div>
-            <label style={{ display: "block", marginBottom: 4 }}>
-              发音人（点试听后选择）
-            </label>
-            <VoicePicker
-              value={editRoleVoiceId}
-              onChange={setEditRoleVoiceId}
-              voices={voices}
-              bookProvider={book?.providerConfig.provider}
-            />
-          </div>
-        </Space>
-      </Modal>
-
-      {/* 旁白编辑弹框（和角色编辑一样的交互） */}
-      <Modal
-        title="编辑角色：旁白"
-        open={narrationEditOpen}
-        onCancel={() => setNarrationEditOpen(false)}
-        onOk={handleSaveNarrationVoice}
-        okText="保存"
-        destroyOnHidden
-      >
-        <Space direction="vertical" style={{ width: "100%" }} size="middle">
-          <div>
-            <label style={{ display: "block", marginBottom: 4 }}>角色名</label>
-            <Input value="旁白" disabled />
-          </div>
-          <div>
-            <label style={{ display: "block", marginBottom: 4 }}>
-              发音人（点试听后选择）
-            </label>
-            <VoicePicker
-              value={narrationVoiceId}
-              onChange={setNarrationVoiceId}
-              voices={voices}
-              bookProvider={book?.providerConfig.provider}
-            />
-          </div>
-        </Space>
-      </Modal>
-    </div>
-  );
-}
-
 /** 段落行：左右布局 */
-function ParagraphRow({
+const ParagraphRow = ({
   paragraph,
-  index,
   voices,
-  capabilities,
+  capabilitiesByProvider,
   bookRoles,
   bookTemplates,
   provider,
   onUpdate,
   onEditRole,
-  onEditNarration,
   onPreviewStateChange,
 }: {
   paragraph: any;
-  index: number;
+  index?: number;
   voices: VxVoice[];
-  capabilities?: VxProviderCapabilities;
+  capabilitiesByProvider?: Partial<Record<VxProvider, VxProviderCapabilities>>;
   bookRoles: string[];
   bookTemplates: any[];
   provider: VxProvider;
   onUpdate: (patch: any) => void;
-  onEditRole: (name: string) => void;
-  onEditNarration: () => void;
+  onEditRole: (paragraph: VxParagraph) => void;
   onPreviewStateChange: (
     paragraphId: string,
     state: { hasPreview: boolean; hasSelected: boolean },
   ) => void;
-}) {
+}) => {
   const [previewing, setPreviewing] = useState(false);
   const [synthesizing, setSynthesizing] = useState(false);
-  // 试听记录：每次试听生成一条，合成使用勾选的那一条
   const [previewList, setPreviewList] = useState<{ id: string; url: string; time: number }[]>([]);
   const [selectedPreviewId, setSelectedPreviewId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const isCharacter = paragraph.role === "character";
+  const roleColor = getRoleColor(paragraph.characterName);
 
-  // 切换页面/卸载时终止试听播放
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
     };
   }, []);
 
-  // 向父级上报本段落的试听/勾选状态（用于控制一键合成可用性）
   useEffect(() => {
     onPreviewStateChange(paragraph.id, {
       hasPreview: previewList.length > 0,
@@ -615,12 +108,10 @@ function ParagraphRow({
   }, [onPreviewStateChange, paragraph.id, previewList, selectedPreviewId]);
 
   const playById = (id: string, url: string) => {
-    // 正在播放当前音频则暂停
     if (playingId === id) {
       audioRef.current?.pause();
       return;
     }
-    // 切到新音频前先停掉旧的
     audioRef.current?.pause();
     const audio = new Audio(url);
     audio.onended = () => setPlayingId(null);
@@ -630,7 +121,6 @@ function ParagraphRow({
     setPlayingId(id);
   };
 
-  /** 停止当前试听播放 */
   const stopPreview = () => {
     audioRef.current?.pause();
     audioRef.current = null;
@@ -640,6 +130,10 @@ function ParagraphRow({
   const updateVoiceParams = (patch: Partial<VxVoiceParams>) => {
     onUpdate({ voiceParams: { ...paragraph.voiceParams, ...patch } });
   };
+
+  const voiceProvider =
+    voices.find((v) => v.id === paragraph.voiceId)?.provider ?? provider;
+  const voiceCapabilities = capabilitiesByProvider?.[voiceProvider];
 
   const handlePreview = async () => {
     if (!paragraph.voiceId) {
@@ -652,10 +146,11 @@ function ParagraphRow({
     }
     setPreviewing(true);
     try {
-      // 与发音人（AI 角色）试听同款逻辑：直调 /providers/:provider/preview，文本用当前段落内容
-      const resp = await api.http.post(`/providers/${provider}/preview`, {
+      const resp = await api.http.post(`/providers/${voiceProvider}/preview`, {
         text: paragraph.text,
         voiceId: paragraph.voiceId,
+        voiceModel: paragraph.voiceModel,
+        voiceParams: paragraph.voiceParams,
         format: "wav",
         sampleRate: 24000,
       });
@@ -665,7 +160,6 @@ function ParagraphRow({
           ? `data:audio/wav;base64,${resp.data.audioData}`
           : undefined;
       if (audioUrl) {
-        // 每次试听生成一条记录，默认勾选最新一条用于合成
         const item = {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           url: audioUrl,
@@ -682,7 +176,6 @@ function ParagraphRow({
     }
   };
 
-  /** 重新播放列表中的某条试听记录 */
   const handleReplay = (item: { id: string; url: string; time: number }) => {
     playById(item.id, item.url);
   };
@@ -719,7 +212,7 @@ function ParagraphRow({
     const sv = voices.find((v) => v.id === paragraph.voiceId);
     return (
       sv?.supportedEmotions ??
-      capabilities?.availableEmotions ??
+      voiceCapabilities?.availableEmotions ??
       Object.values(VxEmotion)
     );
   })();
@@ -731,8 +224,8 @@ function ParagraphRow({
         gap: 12,
         padding: 16,
         marginBottom: 12,
-        background: isCharacter ? "#f6f9ff" : "#f6fff8",
-        borderLeft: `4px solid ${isCharacter ? "#1677ff" : "#52c41a"}`,
+        background: roleColor.bg,
+        borderLeft: `4px solid ${roleColor.color}`,
         borderRadius: 6,
       }}
     >
@@ -751,37 +244,24 @@ function ParagraphRow({
           <Select
             size="small"
             style={{ flex: 1 }}
-            value={
-              paragraph.role === "character" ? paragraph.characterName : "旁白"
-            }
+            value={paragraph.characterName || "旁白"}
             onChange={(v: string) => {
-              // 切换角色立即停止当前试听播放
+              // 切换角色立即停止当前试听播放；角色名不存在于模板时保留段落原发音人
               stopPreview();
-              if (v === "旁白") {
-                onUpdate({ role: "narration", characterName: undefined });
-              } else {
-                const tpl = bookTemplates.find(
-                  (t: any) => t.characterName === v,
-                );
-                onUpdate({
-                  role: "character",
-                  characterName: v,
-                  voiceId: tpl?.voiceId,
-                });
-              }
+              const tpl = bookTemplates.find((t: any) => t.characterName === v);
+              onUpdate({
+                characterName: v,
+                ...(tpl?.voiceId
+                  ? { voiceId: tpl.voiceId, voiceModel: tpl.voiceModel }
+                  : {}),
+              });
             }}
             options={bookRoles.map((r) => ({ label: r, value: r }))}
           />
           <Button
             size="small"
             icon={<EditOutlined />}
-            onClick={() => {
-              if (paragraph.role === "character" && paragraph.characterName) {
-                onEditRole(paragraph.characterName);
-              } else {
-                onEditNarration();
-              }
-            }}
+            onClick={() => onEditRole(paragraph)}
           />
         </Space.Compact>
       </div>
@@ -801,8 +281,8 @@ function ParagraphRow({
                 语速 {(paragraph.voiceParams?.speed ?? 1).toFixed(1)}
               </small>
               <Slider
-                min={capabilities?.speedRange.min ?? 0.5}
-                max={capabilities?.speedRange.max ?? 2}
+                min={voiceCapabilities?.speedRange.min ?? 0.5}
+                max={voiceCapabilities?.speedRange.max ?? 2}
                 step={0.1}
                 value={paragraph.voiceParams?.speed ?? 1}
                 onChange={(v) => updateVoiceParams({ speed: v })}
@@ -815,8 +295,8 @@ function ParagraphRow({
                 音调 {(paragraph.voiceParams?.pitch ?? 1).toFixed(1)}
               </small>
               <Slider
-                min={capabilities?.pitchRange.min ?? 0.5}
-                max={capabilities?.pitchRange.max ?? 2}
+                min={voiceCapabilities?.pitchRange.min ?? 0.5}
+                max={voiceCapabilities?.pitchRange.max ?? 2}
                 step={0.1}
                 value={paragraph.voiceParams?.pitch ?? 1}
                 onChange={(v) => updateVoiceParams({ pitch: v })}
@@ -833,7 +313,7 @@ function ParagraphRow({
               value: e,
             }))}
           />
-          {capabilities?.supportsInstruction !== false && (
+          {voiceCapabilities?.supportsInstruction !== false && (
             <Input
               size="small"
               placeholder="自然语言指令"
@@ -955,6 +435,407 @@ function ParagraphRow({
         {/* 合成功能开发中：暂未实现，统一显示未合成 */}
         <Tag color="default">未合成</Tag>
       </div>
+    </div>
+  );
+}
+
+export default function ChapterDetail() {
+  const { bookId, chapterId } = useParams();
+  const navigate = useNavigate();
+  const { currentProject, voices, loadAllVoices } = useStore.getState();
+  const [chapter, setChapter] = useState<VxChapter | null>(null);
+  const [book, setBook] = useState(currentProject);
+  const [capabilitiesByProvider, setCapabilitiesByProvider] = useState<
+    Partial<Record<VxProvider, VxProviderCapabilities>>
+  >({});
+  const [bookRoles, setBookRoles] = useState<string[]>([]);
+  const [bookTemplates, setBookTemplates] = useState<any[]>([]);
+  const [editRoleOpen, setEditRoleOpen] = useState(false);
+  const [editingParagraphInfo, setEditingParagraphInfo] = useState<VxParagraph | undefined>(undefined);
+  const [editRoleVoiceId, setEditRoleVoiceId] = useState<string | undefined>();
+  const [editRoleVoiceModel, setEditRoleVoiceModel] = useState<string | undefined>();
+  const [previewStates, setPreviewStates] = useState<
+    Record<string, { hasPreview: boolean; hasSelected: boolean }>
+  >({});
+  const [batchSynthesizing, setBatchSynthesizing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{
+    index: number;
+    total: number;
+    success: number;
+    failed: number;
+    skipped: number;
+  } | null>(null);
+  const [editingChapterName, setEditingChapterName] = useState(false);
+  const [chapterNameValue, setChapterNameValue] = useState("");
+
+  const load = async () => {
+    if (!bookId) return;
+    const proj = await api.fetchProject(bookId);
+    setBook(proj);
+    useStore.setState({ currentProject: proj });
+    const ch = proj.chapters.find((c) => c.id === chapterId);
+    setChapter(ch ?? null);
+    // 加载全部 Provider 能力（混用时按发音人所属 Provider 取对应能力）
+    const caps: Partial<Record<VxProvider, VxProviderCapabilities>> = {};
+    await Promise.all(
+      [VxProvider.ALIYUN, VxProvider.DOUBAO].map(async (p) => {
+        try {
+          caps[p] = await api.fetchCapabilities(p);
+        } catch {
+          /* 未配置凭证则空 */
+        }
+      }),
+    );
+    setCapabilitiesByProvider(caps);
+    // 自动加载全部 Provider 发音人（凭证由服务器 .env 提供）
+    try {
+      await loadAllVoices();
+    } catch {
+      /* 未配置凭证则空 */
+    }
+    try {
+      const tpls = await api.fetchVoiceTemplates(bookId);
+      setBookTemplates(tpls);
+      setBookRoles(tpls.map((t) => t.characterName));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [bookId, chapterId]);
+
+  /** 收集段落行上报的试听/勾选状态（引用相同则不更新，避免多余渲染） */
+  const handlePreviewStateChange = useCallback(
+    (
+      paragraphId: string,
+      state: { hasPreview: boolean; hasSelected: boolean },
+    ) => {
+      setPreviewStates((prev) => {
+        const cur = prev[paragraphId];
+        if (
+          cur &&
+          cur.hasPreview === state.hasPreview &&
+          cur.hasSelected === state.hasSelected
+        ) {
+          return prev;
+        }
+        return { ...prev, [paragraphId]: state };
+      });
+    },
+    [],
+  );
+
+  if (!chapter || !book) {
+    return <div>加载中...</div>;
+  }
+
+  const chapters = book.chapters;
+  const curIdx = chapters.findIndex((c) => c.id === chapterId);
+  const prevCh = curIdx > 0 ? chapters[curIdx - 1] : null;
+  const nextCh = curIdx < chapters.length - 1 ? chapters[curIdx + 1] : null;
+
+  const handleSaveAll = async () => {
+    for (const p of chapter.paragraphs) {
+      try {
+        await api.updateParagraph(p.id, {
+          text: p.text,
+          role: p.role,
+          characterName: p.characterName,
+          voiceId: p.voiceId,
+          voiceParams: p.voiceParams,
+        });
+      } catch (e) {
+        message.error("保存失败：" + api.extractError(e));
+        return;
+      }
+    }
+    message.success("整章已保存");
+    useStore.getState().clearChapterDirty(chapter.id);
+  };
+
+  /** 双击章节名称编辑 */
+  const handleStartRenameChapter = () => {
+    setChapterNameValue(chapter.title);
+    setEditingChapterName(true);
+  };
+
+  const handleConfirmRenameChapter = async () => {
+    if (!chapterId || !chapterNameValue.trim()) return;
+    try {
+      await api.renameChapter(chapterId, chapterNameValue.trim());
+      setEditingChapterName(false);
+      load();
+    } catch (e) {
+      message.error("重命名失败：" + api.extractError(e));
+    }
+  };
+
+  /** 打开编辑角色弹框（从段落旁的编辑图标触发，旁白也是普通角色，同样可编辑） */
+  const handleEditRole = (paragraph: any) => {
+    setEditingParagraphInfo(paragraph)
+    const tpl = bookTemplates.find((t) => t.characterName === paragraph?.characterName);
+    setEditRoleVoiceId(tpl?.voiceId);
+    setEditRoleVoiceModel(tpl?.voiceModel);
+    setEditRoleOpen(true);
+  };
+
+  /** 保存编辑角色（同步到 templates，允许清空发音人） */
+  const handleSaveEditRole = async () => {
+    const { characterName } = editingParagraphInfo || {};
+    if (!bookId || !characterName) {
+      message.warning("请填写角色名");
+      return;
+    }
+    try {
+      await api.saveTemplate(bookId, characterName, editRoleVoiceId ?? "", editRoleVoiceModel);
+
+      // 编辑角色模板后，把新声音同步到当前段落，避免“角色选择框/编辑弹窗”与“试听”发音人不一致
+      if (editingParagraphInfo?.id) {
+        const patch = { voiceId: editRoleVoiceId, voiceModel: editRoleVoiceModel };
+        await api.updateParagraph(editingParagraphInfo.id, patch);
+        updateLocal(editingParagraphInfo.id, patch);
+      }
+
+      message.success("编辑成功");
+      setEditRoleOpen(false);
+      const tpls = await api.fetchVoiceTemplates(bookId);
+      setBookTemplates(tpls);
+      setBookRoles(tpls.map((t) => t.characterName));
+    } catch (e) {
+      message.error("编辑失败：" + api.extractError(e));
+    }
+  };
+
+  const handleAddParagraph = async () => {
+    try {
+      // 新增段落默认角色为"旁白"（书籍默认角色）
+      await useStore.getState().addParagraph(chapter.id, "", "旁白");
+      load();
+    } catch (e) {
+      message.error("新增失败：" + api.extractError(e));
+    }
+  };
+
+  const handleSynthesizeAll = async () => {
+    message.info("一键合成功能开发中")
+    // setBatchSynthesizing(true);
+    // setBatchProgress({
+    //   index: 0,
+    //   total: chapter.paragraphs.length,
+    //   success: 0,
+    //   failed: 0,
+    //   skipped: 0,
+    // });
+    // try {
+    //   await api.synthesizeAllStream(chapter.id, (e) => {
+    //     setBatchProgress({
+    //       index: e.index,
+    //       total: e.total,
+    //       success: e.success,
+    //       failed: e.failed,
+    //       skipped: e.skipped,
+    //     });
+    //     if (e.type === "done" && e.result)
+    //       message.success(
+    //         `合成完成：成功${e.result.success} 失败${e.result.failed} 跳过${e.result.skipped}`,
+    //       );
+    //   });
+    //   load();
+    // } catch (e) {
+    //   message.error("合成失败：" + api.extractError(e));
+    // } finally {
+    //   setBatchSynthesizing(false);
+    //   setBatchProgress(null);
+    // }
+  };
+
+  const updateLocal = (
+    id: string,
+    patch: Partial<(typeof chapter.paragraphs)[0]>,
+  ) => {
+    setChapter((ch) =>
+      ch
+        ? {
+            ...ch,
+            paragraphs: ch.paragraphs.map((p) =>
+              p.id === id ? { ...p, ...patch } : p,
+            ),
+          }
+        : null,
+    );
+    useStore.getState().markChapterDirty(chapter.id);
+  };
+
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <Space>
+          <Button
+            type="link"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate(`/books/${bookId}`)}
+          />
+          <span style={{ color: "#999" }}>{book.name}</span>
+        </Space>
+        <Space>
+          {editingChapterName ? (
+            <Input
+              size="small"
+              style={{ width: 200 }}
+              value={chapterNameValue}
+              onChange={(e) => setChapterNameValue(e.target.value)}
+              onPressEnter={handleConfirmRenameChapter}
+              onBlur={handleConfirmRenameChapter}
+              autoFocus
+            />
+          ) : (
+            <span
+              style={{ fontSize: 18, fontWeight: 600, cursor: "pointer" }}
+              onDoubleClick={handleStartRenameChapter}
+              title="双击编辑章节名称"
+            >
+              {chapter.title}
+            </span>
+          )}
+        </Space>
+        <Space>
+          <Button type="primary" onClick={handleSaveAll}>
+            保存
+          </Button>
+          <Button
+            disabled={!prevCh}
+            onClick={() =>
+              prevCh && navigate(`/books/${bookId}/chapters/${prevCh.id}`)
+            }
+          >
+            上一章
+          </Button>
+          <Button
+            disabled={!nextCh}
+            onClick={() =>
+              nextCh && navigate(`/books/${bookId}/chapters/${nextCh.id}`)
+            }
+          >
+            下一章
+          </Button>
+        </Space>
+      </div>
+
+      {/* 按钮行 */}
+      <Space style={{ marginBottom: 16 }}>
+        <Button
+          size="small"
+          type="primary"
+          onClick={handleAddParagraph}
+          title="新增段落（默认角色：旁白）"
+        >
+          新增段落
+        </Button>
+        <Button size="small" onClick={() => message.info("批量导入段落开发中")}>
+          批量导入段落
+        </Button>
+        <Tooltip
+          title={
+            chapter.paragraphs.length === 0 ||
+            chapter.paragraphs.every((p) => {
+              const st = previewStates[p.id];
+              return st?.hasPreview && st?.hasSelected;
+            })
+              ? undefined
+              : "所有段落都需先试听并勾选各自的音频"
+          }
+        >
+          <Button
+            size="small"
+            loading={batchSynthesizing}
+            disabled={
+              chapter.paragraphs.length === 0 ||
+              !chapter.paragraphs.every((p) => {
+                const st = previewStates[p.id];
+                return st?.hasPreview && st?.hasSelected;
+              })
+            }
+            onClick={handleSynthesizeAll}
+          >
+            一键合成
+          </Button>
+        </Tooltip>
+        <Button size="small" onClick={() => message.info("导出成品开发中")}>
+          导出成品
+        </Button>
+      </Space>
+
+      {batchProgress && (
+        <Progress
+          percent={
+            batchProgress.total
+              ? Math.round((batchProgress.index / batchProgress.total) * 100)
+              : 0
+          }
+          status={batchSynthesizing ? "active" : "normal"}
+          format={() =>
+            `${batchProgress.index}/${batchProgress.total} · 成功${batchProgress.success} 失败${batchProgress.failed} 跳过${batchProgress.skipped}`
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {/* 段落列表：左右布局 */}
+      {chapter.paragraphs.length === 0 && (
+        <div style={{ color: "#999" }}>暂无段落，点击上方按钮添加</div>
+      )}
+      {chapter.paragraphs.map((p, i) => (
+        <ParagraphRow
+          key={p.id}
+          paragraph={p}
+          index={i}
+          voices={voices}
+          capabilitiesByProvider={capabilitiesByProvider}
+          bookRoles={bookRoles}
+          bookTemplates={bookTemplates}
+          provider={book.providerConfig.provider}
+          onUpdate={(patch) => updateLocal(p.id, patch)}
+          onEditRole={handleEditRole}
+          onPreviewStateChange={handlePreviewStateChange}
+        />
+      ))}
+
+      {/* 编辑角色弹框（从段落旁编辑图标触发） */}
+      <Modal
+        title={`编辑角色：${editingParagraphInfo?.characterName}`}
+        open={editRoleOpen}
+        onCancel={() => setEditRoleOpen(false)}
+        onOk={handleSaveEditRole}
+        okText="保存"
+        width={680}
+        destroyOnHidden
+      >
+        <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <div>
+            <label style={{ display: "block", marginBottom: 4 }}>角色名</label>
+            <Input value={editingParagraphInfo?.characterName} disabled />
+          </div>
+          <div>
+            <VoicePicker
+              voiceId={editRoleVoiceId}
+              voiceModel={editRoleVoiceModel}
+              onChange={(id, model) => { setEditRoleVoiceId(id); setEditRoleVoiceModel(model); }}
+              voices={voices}
+              bookProvider={book?.providerConfig.provider}
+              sampleText={editingParagraphInfo?.text}
+            />
+          </div>
+        </Space>
+      </Modal>
     </div>
   );
 }
